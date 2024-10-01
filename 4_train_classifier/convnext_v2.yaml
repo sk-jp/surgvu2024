@@ -1,0 +1,155 @@
+General:
+    project: SurgVU2024_cls
+    seed: 1234
+    accelerator: gpu    # cpu, gpu
+    precision: 16    # 16, 32, bf16
+    strategy: ddp    # ddp, ddp2, dp, none
+    num_nodes: 1
+    gpus: 0
+    epoch: &epoch 10
+    check_val_every_n_epoch: 1
+    debug: False
+    lr_tune: False
+    mode: train
+
+Data:
+    dataset:
+        top_dir: /data/MICCAI2024_SurgVU/images_all
+        train_datalist: datalist/train_datalist.csv
+        valid_datalist: datalist/valid_datalist.csv
+        num_labels: &num_labels 13
+        cache_dir: /data4/cache/surgvu2024_cls
+    dataloader:
+        batch_size: 64
+        num_workers: 4
+        pin_memory: False
+        persistent_workers: True
+        train:
+            shuffle: True
+        valid:
+            shuffle: False
+        test:
+            shuffle: False
+
+Model:
+    arch: timm
+    params:
+#        model_name: convnext_large_mlp.clip_laion2b_soup_ft_in12k_in1k_384
+#        model_name: convnextv2_base.fcmae_ft_in22k_in1k_384
+        model_name: convnextv2_tiny.fcmae_ft_in22k_in1k_384
+        pretrained: True
+        in_channels: 3
+        num_classes: *num_labels
+        freeze_stem: True
+    pretrained: None
+
+Optimizer:
+    optimizer:
+        name: Adam
+        params:
+            lr: !!python/float 1e-4   # 1 GPU
+    lr_scheduler:
+        name: CosineAnnealingLR
+        params:
+            T_max: *epoch
+    accumulate_grad_batches: 1
+
+Loss:
+    lossfuns: [BCEWithLogitsLoss]
+    lossfun_weights: [1.0]
+    BCEWithLogitsLoss:
+        name: bce
+        params:
+            weight: None
+            reduction: mean
+            pos_weight: None
+
+Transform:
+    resize_width: &resize_width 384
+    resize_height: &resize_height 384
+    roi1: &roi1 [0, 0, 898, 56]
+    roi2: &roi2 [0, 671, 898, 720]
+    train:
+        - name: LoadImaged
+          params:
+            keys: ["image"]
+        - name: EnsureChannelFirstd
+          params:
+            keys: ["image"]
+        - name: Transposed
+          params:
+            keys: ["image"]
+            indices: [0, 2, 1]
+#        - name: DataStatsd
+#          params:
+#            keys: ["image"]
+        - name: Blackd
+          params:
+            keys: ["image"]
+            roi: *roi1
+        - name: Blackd
+          params:
+            keys: ["image"]
+            roi: *roi2
+        - name: RandAffined
+          params:
+            keys: ["image"]
+            rotate_range: 0.1
+            translate_range: [10, 10]
+            scale_range: [0.05, 0.05]
+            mode: ["bicubic"]
+            padding_mode: ["zeros"]
+            prob: 0.50
+        - name: Resized
+          params:
+            keys: ["image"]
+            spatial_size: [*resize_height, *resize_width]
+            mode: ["bicubic"]
+        - name: NormalizeIntensityd
+          params:
+            keys: ["image"]
+            subtrahend: [123.675, 116.28, 103.53]
+            divisor: [58.395, 57.12, 57.375]
+            channel_wise: True
+        - name: ToTensord
+          params:
+            keys: ["image"]
+    valid:
+        - name: LoadImaged
+          params:
+            keys: ["image"]
+        - name: EnsureChannelFirstd
+          params:
+            keys: ["image"]
+        - name: Transposed
+          params:
+            keys: ["image"]
+            indices: [0, 2, 1]
+        - name: Blackd
+          params:
+            keys: ["image"]
+            roi: *roi1
+        - name: Blackd
+          params:
+            keys: ["image"]
+            roi: *roi2
+        - name: Resized
+          params:
+            keys: ["image"]
+            spatial_size: [*resize_height, *resize_width]
+            mode: ["bicubic"]
+        - name: NormalizeIntensityd
+          params:
+            keys: ["image"]
+            subtrahend: [123.675, 116.28, 103.53]
+            divisor: [58.395, 57.12, 57.375]
+            channel_wise: True
+        - name: ToTensord
+          params:
+            keys: ["image"]
+    predict:
+
+Tuner:
+    min_lr: !!python/float 1e-6
+    max_lr: !!python/float 1e-1
+    num_training: 100
